@@ -2,10 +2,11 @@ import './styles/main.css'
 import { createGame } from '@/game/gameState'
 import { mountEarth } from '@/game/earthGame'
 import type { WorldZonesPayload } from '@/zones/worldData'
+import { publicAsset } from '@/publicAsset'
 import { decodeLandBits } from '@/zones/worldData'
 
 async function loadPayload(): Promise<WorldZonesPayload> {
-  const res = await fetch(`${import.meta.env.BASE_URL}data/zones.json`)
+  const res = await fetch(publicAsset('data/zones.json'))
   if (!res.ok) throw new Error(`zones.json: ${res.status}`)
   return res.json() as Promise<WorldZonesPayload>
 }

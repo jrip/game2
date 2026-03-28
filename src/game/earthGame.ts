@@ -9,6 +9,7 @@ import { latLonDegToUnit, nearestZoneByGeodesic } from '@/geo/latLon'
 import { unitToLatLonDeg } from '@/geo/sphereGeo'
 import type { PlayerId, ZoneStack } from '@/game/gameState'
 import { drawDiceStack, stackPixelHeight } from '@/game/diceDraw'
+import { publicAsset } from '@/publicAsset'
 
 const DRAG_SENS = 0.006
 
@@ -262,10 +263,8 @@ export function mountEarth(
     } satisfies Partial<CSSStyleDeclaration>)
   }
 
-  const setup = loadTexture(
-    `${import.meta.env.BASE_URL}data/earth-zones.png`,
-    renderer,
-  ).then((map) => {
+  const setup = loadTexture(publicAsset('data/earth-zones.png'), renderer).then(
+    (map) => {
     const mat = new THREE.MeshStandardMaterial({
       map,
       roughness: 0.82,
