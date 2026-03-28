@@ -1,5 +1,5 @@
-# Сборка: на ЛЮБОЙ ветке при push, и на любом pull request.
-# GitHub Pages (один URL на репозиторий): только при push в main — иначе каждая ветка затирала бы сайт.
+# Сборка: на любой ветке (push) и на любом pull request.
+# GitHub Pages: деплой только при push в default branch репозитория (master / main — как настроено в GitHub).
 name: Build and deploy Pages
 
 on:
@@ -39,13 +39,13 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
 
       - name: Upload Pages artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
         uses: actions/upload-pages-artifact@v3
         with:
           path: dist
 
   deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     needs: build
     runs-on: ubuntu-latest
     environment:
