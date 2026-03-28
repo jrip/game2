@@ -262,7 +262,10 @@ export function mountEarth(
     } satisfies Partial<CSSStyleDeclaration>)
   }
 
-  const setup = loadTexture('/data/earth-zones.png', renderer).then((map) => {
+  const setup = loadTexture(
+    `${import.meta.env.BASE_URL}data/earth-zones.png`,
+    renderer,
+  ).then((map) => {
     const mat = new THREE.MeshStandardMaterial({
       map,
       roughness: 0.82,
