@@ -71,6 +71,7 @@ export function mountEarth(
 
   const raycaster = new THREE.Raycaster()
   const ndc = new THREE.Vector2()
+  const localHit = new THREE.Vector3()
 
   let rmbDown = false
 
@@ -124,7 +125,10 @@ export function mountEarth(
       return
     }
 
-    const p = hits[0].point.clone().normalize()
+    /** Текстура equirectangular зашита в локальные координаты меша; группа крутится.
+     * Без worldToLocal вектор смотрит «как неповёрнутый шар» → зона и маска суши уезжают на другую сторону. */
+    earth.worldToLocal(localHit.copy(hits[0].point))
+    const p = localHit.normalize()
     const { latDeg, lonDeg } = unitToLatLonDeg(p.x, p.y, p.z)
 
     if (!isLandAtLonLat(payload, landBits, lonDeg, latDeg)) {

@@ -1,8 +1,9 @@
 /**
  * Землеподобная карта:
- * - сначала строим чистый сферический Вороной (128 зон),
- * - затем выбираем "сушу" целыми ячейками вокруг якорей материков,
- * - поэтому сегменты на суше не накладываются и остаются выпуклыми ячейками Вороного.
+ * - сначала строим чистый сферический Вороной (80 зон),
+ * - суша — целые ячейки вокруг якорей (Евразия с фазами якоря для вытягивания),
+ * - разрозненные куски соединяются цепочками океанических зон (узкие перемычки),
+ * - затем добавляются мелкие прибрежные острова (одна зона, только у берега).
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -12,10 +13,10 @@ import { PNG } from 'pngjs'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.join(__dirname, '..')
 
-const ZONE_COUNT = 128
+const ZONE_COUNT = 80
 const TEXTURE_W = 2048
 const TEXTURE_H = 1024
-const LLOYD_ITERS = 16
+const LLOYD_ITERS = 14
 const JITTER = 0.06
 
 function normalize3([x, y, z]) {
@@ -246,6 +247,10 @@ function pickNearestUnclaimed(zoneVecs, claimed, centerVec, maxDeg = 180) {
   return best
 }
 
+/**
+ * @param {object} opts
+ * @param {Array<{lat:number, lon:number, until:number}>} [opts.phaseCenters] — при |out| >= until[i] переключаем якорь на следующий (вытянутая Евразия).
+ */
 function growContinent({
   zoneVecs,
   adjacency,
@@ -255,8 +260,23 @@ function growContinent({
   target,
   maxDeg,
   tag,
+  phaseCenters,
 }) {
-  const seed = pickNearestUnclaimed(zoneVecs, claimed, centerVec, maxDeg * 1.25)
+  let phaseIdx = 0
+  let cv = centerVec
+  let cLat = centerLatDeg
+  const applyPhase = () => {
+    if (!phaseCenters?.length) return
+    const pc = phaseCenters[phaseIdx]
+    cv = lonLatDegToVec(pc.lat, pc.lon)
+    cLat = pc.lat
+  }
+  if (phaseCenters?.length) {
+    phaseIdx = 0
+    applyPhase()
+  }
+
+  const seed = pickNearestUnclaimed(zoneVecs, claimed, cv, maxDeg * 1.25)
   if (seed < 0) return []
   const out = [seed]
   claimed[seed] = tag
@@ -264,16 +284,26 @@ function growContinent({
   inCont[seed] = 1
 
   while (out.length < target) {
+    if (phaseCenters?.length) {
+      while (
+        phaseIdx < phaseCenters.length - 1 &&
+        out.length >= phaseCenters[phaseIdx].until
+      ) {
+        phaseIdx++
+        applyPhase()
+      }
+    }
+
     let best = -1
     let bestScore = Infinity
 
     for (const z of out) {
       for (const n of adjacency[z]) {
         if (claimed[n] >= 0 || inCont[n]) continue
-        const d = geodesicDeg(zoneVecs[n], centerVec)
+        const d = geodesicDeg(zoneVecs[n], cv)
         if (d > maxDeg) continue
         const { latDeg } = zoneLatLon(zoneVecs, n)
-        const latPenalty = Math.abs(latDeg - centerLatDeg) * 0.18
+        const latPenalty = Math.abs(latDeg - cLat) * 0.18
         const score = d + latPenalty
         if (score < bestScore) {
           bestScore = score
@@ -283,7 +313,7 @@ function growContinent({
     }
 
     if (best < 0) {
-      best = pickNearestUnclaimed(zoneVecs, claimed, centerVec, maxDeg * 1.45)
+      best = pickNearestUnclaimed(zoneVecs, claimed, cv, maxDeg * 1.45)
       if (best < 0) break
     }
     out.push(best)
@@ -293,15 +323,133 @@ function growContinent({
   return out
 }
 
+/** Связные компоненты суши в графе зон. */
+function findLandComponents(landZones, adjacency) {
+  const visited = new Set()
+  const comps = []
+  for (const z of landZones) {
+    if (visited.has(z)) continue
+    const comp = []
+    const q = [z]
+    visited.add(z)
+    for (let qi = 0; qi < q.length; qi++) {
+      const u = q[qi]
+      comp.push(u)
+      for (const v of adjacency[u]) {
+        if (!landZones.has(v) || visited.has(v)) continue
+        visited.add(v)
+        q.push(v)
+      }
+    }
+    comps.push(comp)
+  }
+  return comps
+}
+
+/** Кратчайший «мост» между двумя компонентами через океанические зоны (остальная суша непроходима). */
+function oceanBridgeZones(compA, compB, landSet, adjacency) {
+  const setA = new Set(compA)
+  const setB = new Set(compB)
+  const q = []
+  const parent = new Map()
+  for (const z of compA) {
+    q.push(z)
+    parent.set(z, -1)
+  }
+  let end = -1
+  outer: while (q.length) {
+    const u = q.shift()
+    for (const v of adjacency[u]) {
+      if (setB.has(v)) {
+        if (!parent.has(v)) parent.set(v, u)
+        end = v
+        break outer
+      }
+      if (landSet.has(v)) {
+        if (setA.has(v)) continue
+        continue
+      }
+      if (parent.has(v)) continue
+      parent.set(v, u)
+      q.push(v)
+    }
+  }
+  if (end < 0) return []
+  const bridge = []
+  let cur = end
+  while (cur >= 0) {
+    const p = parent.get(cur)
+    if (p === undefined || p === -1) break
+    if (!setA.has(cur) && !setB.has(cur)) bridge.push(cur)
+    cur = p
+    if (setA.has(cur)) break
+  }
+  return bridge
+}
+
+/** Соединяет все куски суши цепочками океанических зон (на карте — узкие перемычки). */
+function connectLandComponents(landZones, adjacency) {
+  const land = new Set(landZones)
+  let guard = 0
+  while (guard++ < 64) {
+    const comps = findLandComponents(land, adjacency)
+    if (comps.length <= 1) break
+    const bridge = oceanBridgeZones(comps[0], comps[1], land, adjacency)
+    if (bridge.length === 0) {
+      throw new Error(
+        'Не удалось соединить два материка: нет пути только через океан в графе зон',
+      )
+    }
+    for (const z of bridge) land.add(z)
+  }
+  return land
+}
+
+/** Одиночные зоны-острова: только океан, граничащий с уже выбранной сушей. */
+function addCoastalIslandZones(landZones, adjacency, maxIslands) {
+  const land = new Set(landZones)
+  const candidates = []
+  for (let z = 0; z < adjacency.length; z++) {
+    if (land.has(z)) continue
+    let nearLand = false
+    for (const n of adjacency[z]) {
+      if (land.has(n)) {
+        nearLand = true
+        break
+      }
+    }
+    if (nearLand) candidates.push(z)
+  }
+  candidates.sort((a, b) => a - b)
+  const stride = Math.max(1, Math.floor(candidates.length / maxIslands))
+  let added = 0
+  for (let i = 0; i < candidates.length && added < maxIslands; i += stride) {
+    land.add(candidates[i])
+    added++
+  }
+  return land
+}
+
 function buildEarthLikeLandZones(zoneVecs, adjacency) {
   const specs = [
-    { name: 'NA', lat: 47, lon: -103, target: 12, maxDeg: 43 },
-    { name: 'SA', lat: -17, lon: -61, target: 9, maxDeg: 36 },
-    { name: 'EUAS', lat: 50, lon: 68, target: 20, maxDeg: 56 },
-    { name: 'AF', lat: 8, lon: 23, target: 12, maxDeg: 39 },
-    { name: 'AUS', lat: -26, lon: 134, target: 5, maxDeg: 26 },
-    { name: 'GR', lat: 72, lon: -41, target: 2, maxDeg: 18 },
-    { name: 'ANT', lat: -76, lon: 20, target: 7, maxDeg: 35 },
+    { name: 'NA', lat: 47, lon: -103, target: 7, maxDeg: 43 },
+    { name: 'SA', lat: -17, lon: -61, target: 5, maxDeg: 36 },
+    {
+      name: 'EUAS',
+      lat: 52,
+      lon: 22,
+      target: 12,
+      maxDeg: 56,
+      phaseCenters: [
+        { lat: 52, lon: 18, until: 4 },
+        { lat: 50, lon: 72, until: 8 },
+        { lat: 40, lon: 118, until: 12 },
+      ],
+    },
+    { name: 'AF', lat: 8, lon: 23, target: 7, maxDeg: 39 },
+    { name: 'AUS', lat: -26, lon: 134, target: 3, maxDeg: 26 },
+    { name: 'GR', lat: 72, lon: -41, target: 1, maxDeg: 18 },
+    { name: 'ANT', lat: -76, lon: 20, target: 3, maxDeg: 28 },
   ]
 
   const claimed = new Int16Array(zoneVecs.length)
@@ -320,13 +468,14 @@ function buildEarthLikeLandZones(zoneVecs, adjacency) {
       target: sp.target,
       maxDeg: sp.maxDeg,
       tag: i,
+      phaseCenters: sp.phaseCenters,
     })
     for (const z of part) landZones.add(z)
   }
 
-  // Доп. острова отключены: так суша ближе к крупным связным материкам.
-
-  return landZones
+  let merged = connectLandComponents(landZones, adjacency)
+  merged = addCoastalIslandZones(merged, adjacency, 4)
+  return merged
 }
 
 function zonesToLandMask(zAll, landZones) {
