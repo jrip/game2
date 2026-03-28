@@ -1,12 +1,9 @@
 import { defineConfig } from 'vite'
 import { fileURLToPath, URL } from 'node:url'
 
-/** GitHub Pages project site: https://owner.github.io/repo/ → assets under /repo/ */
+/** GitHub Pages project site: https://owner.github.io/repo/ — в CI всегда есть GITHUB_REPOSITORY */
 const repoName = process.env.GITHUB_REPOSITORY?.split('/')[1]
-const base =
-  process.env.GITHUB_ACTIONS === 'true' && repoName
-    ? `/${repoName}/`
-    : '/'
+const base = repoName ? `/${repoName}/` : '/'
 
 export default defineConfig({
   base,
