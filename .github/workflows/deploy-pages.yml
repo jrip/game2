@@ -1,4 +1,5 @@
-# Только push в master (и ручной запуск). Два job — так требует связка upload-pages-artifact + deploy-pages.
+# Деплой только при push в master. У открытого PR GitHub пишет «This branch has not been deployed» — так и должно быть:
+# публикация только после merge (код на master), не с feature-ветки. Запись в Deployments появляется у успешного publish на master.
 name: Deploy GitHub Pages
 
 on:
@@ -22,6 +23,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
 
       - name: Setup Node
         uses: actions/setup-node@v4
