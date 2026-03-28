@@ -2,6 +2,9 @@ export interface ZoneDef {
   id: number
   latDeg: number
   lonDeg: number
+  /** Центр пятна суши в зоне (из генератора); для UI точнее, чем latDeg/lonDeg сайта. */
+  anchorLatDeg?: number
+  anchorLonDeg?: number
 }
 
 export interface WorldZonesPayload {
@@ -11,6 +14,8 @@ export interface WorldZonesPayload {
   landBits: string
   landThreshold: number
   zoneCount: number
+  /** Зоны, в которых есть суша по карте (из генератора). Иначе клиент ошибочно отфильтровывает зоны с сайтом в океане. */
+  landZoneIds?: number[]
   zones: ZoneDef[]
 }
 

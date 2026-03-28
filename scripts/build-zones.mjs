@@ -648,6 +648,66 @@ function vectorsToZoneRecords(vecs) {
   })
 }
 
+/**
+ * Якорь кубиков: сначала среднее (x,y) по сушe зоны, затем ближайший к нему пиксель
+ * этой же зоны. Иначе среднее может выпасть из невыпуклой фигуры — кубики «между» зонами.
+ */
+function mergeLandAnchors(zoneRecords, land, zId, W, H) {
+  const K = zoneRecords.length
+  const sumx = new Float64Array(K)
+  const sumy = new Float64Array(K)
+  const cnt = new Int32Array(K)
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const i = y * W + x
+      if (!land[i]) continue
+      const z = zId[i]
+      sumx[z] += x + 0.5
+      sumy[z] += y + 0.5
+      cnt[z]++
+    }
+  }
+
+  const pixelToLatLon = (px, py) => {
+    const u = (px + 0.5) / W
+    const v = (py + 0.5) / H
+    return {
+      lonDeg: u * 360 - 180,
+      latDeg: 90 - v * 180,
+    }
+  }
+
+  return zoneRecords.map((rec, id) => {
+    if (cnt[id] === 0) return rec
+    const mx = sumx[id] / cnt[id]
+    const my = sumy[id] / cnt[id]
+    let bestX = 0
+    let bestY = 0
+    let bestD = Infinity
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x
+        if (!land[i] || zId[i] !== id) continue
+        const cx = x + 0.5
+        const cy = y + 0.5
+        let dx = cx - mx
+        let dy = cy - my
+        if (dx * dx + dy * dy < bestD) {
+          bestD = dx * dx + dy * dy
+          bestX = x
+          bestY = y
+        }
+      }
+    }
+    const { lonDeg, latDeg } = pixelToLatLon(bestX, bestY)
+    return {
+      ...rec,
+      anchorLatDeg: latDeg,
+      anchorLonDeg: lonDeg,
+    }
+  })
+}
+
 function packBits(land, w, h) {
   const bytes = Math.ceil((w * h) / 8)
   const out = new Uint8Array(bytes)
@@ -685,7 +745,8 @@ function main() {
     )
   }
 
-  const zoneRecords = vectorsToZoneRecords(zoneVecs)
+  let zoneRecords = vectorsToZoneRecords(zoneVecs)
+  zoneRecords = mergeLandAnchors(zoneRecords, land, zLand, TEXTURE_W, TEXTURE_H)
   const landPacked = packBits(land, TEXTURE_W, TEXTURE_H)
   const outDir = path.join(root, 'public/data')
   fs.mkdirSync(outDir, { recursive: true })
@@ -702,8 +763,10 @@ function main() {
   for (let i = 0; i < zLand.length; i++) if (land[i]) nz[zLand[i]]++
   let zmin = Infinity
   let zmax = 0
+  const landZoneIds = []
   for (let z = 0; z < ZONE_COUNT; z++) {
     if (nz[z] === 0) continue
+    landZoneIds.push(z)
     zmin = Math.min(zmin, nz[z])
     zmax = Math.max(zmax, nz[z])
   }
@@ -715,6 +778,7 @@ function main() {
     landBits: Buffer.from(landPacked).toString('base64'),
     landThreshold: 0,
     zoneCount: ZONE_COUNT,
+    landZoneIds,
     zones: zoneRecords,
   }
   fs.writeFileSync(path.join(outDir, 'zones.json'), JSON.stringify(payload), 'utf8')

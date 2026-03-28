@@ -1,8 +1,10 @@
 import * as THREE from 'three'
 import type { WorldZonesPayload } from '@/zones/worldData'
 import { decodeLandBits, isLandAtLonLat } from '@/zones/worldData'
-import { nearestZoneByGeodesic } from '@/geo/latLon'
+import { latLonDegToUnit, nearestZoneByGeodesic } from '@/geo/latLon'
 import { unitToLatLonDeg } from '@/geo/sphereGeo'
+import type { ZoneStack } from '@/game/gameState'
+import { drawDiceStack, stackPixelHeight } from '@/game/diceDraw'
 
 const DRAG_SENS = 0.006
 
@@ -32,8 +34,11 @@ function loadTexture(
 
 export function mountEarth(
   canvas: HTMLCanvasElement,
+  overlayCanvas: HTMLCanvasElement | null,
   payload: WorldZonesPayload,
   onZonePick: (zoneId: number | null) => void,
+  getStacks: () => ZoneStack[],
+  getCurrentPlayer: () => 0 | 1,
 ): () => void {
   const landBits = decodeLandBits(payload.landBits)
 
@@ -72,6 +77,10 @@ export function mountEarth(
   const raycaster = new THREE.Raycaster()
   const ndc = new THREE.Vector2()
   const localHit = new THREE.Vector3()
+  const worldPos = new THREE.Vector3()
+  const clip = new THREE.Vector3()
+  const normal = new THREE.Vector3()
+  const toCam = new THREE.Vector3()
 
   let rmbDown = false
 
@@ -159,6 +168,12 @@ export function mountEarth(
     camera.aspect = w / h
     camera.updateProjectionMatrix()
     renderer.setSize(w, h, false)
+    if (overlayCanvas) {
+      const bw = canvas.width
+      const bh = canvas.height
+      overlayCanvas.width = bw
+      overlayCanvas.height = bh
+    }
   }
 
   const ro = new ResizeObserver(() => setSize())
@@ -167,6 +182,41 @@ export function mountEarth(
   let raf = 0
   const tick = () => {
     renderer.render(scene, camera)
+    if (overlayCanvas && earth) {
+      const octx = overlayCanvas.getContext('2d')
+      if (octx) {
+        const w = overlayCanvas.width
+        const h = overlayCanvas.height
+        octx.clearRect(0, 0, w, h)
+        scene.updateMatrixWorld(true)
+        earth.updateMatrixWorld(true)
+        const mw = earth.matrixWorld
+        const turn = getCurrentPlayer()
+        const now = performance.now()
+        for (const s of getStacks()) {
+          const [lx, ly, lz] = latLonDegToUnit(s.latDeg, s.lonDeg)
+          worldPos.set(lx, ly, lz).multiplyScalar(1.055)
+          worldPos.applyMatrix4(mw)
+          normal.copy(worldPos).normalize()
+          toCam.subVectors(camera.position, worldPos).normalize()
+          if (normal.dot(toCam) < 0.08) continue
+
+          clip.copy(worldPos).project(camera)
+          if (Math.abs(clip.x) > 1.02 || Math.abs(clip.y) > 1.02) continue
+          if (clip.z < -1 || clip.z > 1) continue
+
+          const sx = (clip.x * 0.5 + 0.5) * w
+          const sy = (-clip.y * 0.5 + 0.5) * h
+          /** Нижний край столбика по умолчанию; сдвигаем вниз на полвысоты, чтобы центр столбика был на якоре. */
+          const stackH = stackPixelHeight(s.dice)
+          const syBottom = sy + stackH * 0.5
+          drawDiceStack(octx, sx, syBottom, s.dice, s.owner, {
+            isMyZone: s.owner === turn,
+            timeMs: now,
+          })
+        }
+      }
+    }
     raf = requestAnimationFrame(tick)
   }
 
@@ -188,6 +238,18 @@ export function mountEarth(
     touchAction: 'none',
     boxSizing: 'border-box',
   } satisfies Partial<CSSStyleDeclaration>)
+
+  if (overlayCanvas) {
+    Object.assign(overlayCanvas.style, {
+      position: 'absolute',
+      left: '0',
+      top: '0',
+      width: '100%',
+      height: '100%',
+      pointerEvents: 'none',
+      zIndex: '2',
+    } satisfies Partial<CSSStyleDeclaration>)
+  }
 
   const setup = loadTexture('/data/earth-zones.png', renderer).then((map) => {
     const mat = new THREE.MeshStandardMaterial({
