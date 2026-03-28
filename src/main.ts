@@ -1,5 +1,5 @@
 import './styles/main.css'
-import { createGameState } from '@/game/gameState'
+import { createGame } from '@/game/gameState'
 import { mountEarth } from '@/game/earthGame'
 import type { WorldZonesPayload } from '@/zones/worldData'
 import { decodeLandBits } from '@/zones/worldData'
@@ -20,22 +20,27 @@ function main() {
   loadPayload()
     .then((payload) => {
       const landBits = decodeLandBits(payload.landBits)
-      const game = createGameState(payload, landBits)
+      const game = createGame(payload, landBits)
       const syncTurnHud = () => {
         if (!turnHud) return
         const p = game.currentPlayer
-        turnHud.textContent = `Ход игрока ${p + 1} — его зоны подсвечены (ореол + лёгкая пульсация). Цвета: синий — игрок 1, красный — игрок 2`
+        const hint =
+          game.phase === 'chooseAttacker'
+            ? 'Выбери свою зону (от 2 кубиков) — начать атаку.'
+            : `Выбери соседнюю вражескую зону (атака из ${game.attackerZone}; повторный клик по своей зоне — отмена).`
+        turnHud.textContent = `Ход игрока ${p + 1}. ${hint} Игроки 1–4: синий, коралловый, зелёный, фиолетовый.`
       }
       syncTurnHud()
+      hud.textContent =
+        'Клик по суше: своя зона с 2+ кубиками → затем соседняя чужая. Океан в фазе цели — отмена атаки.'
       mountEarth(
         canvas,
         overlay,
         payload,
         (zoneId) => {
-          hud.textContent =
-            zoneId === null
-              ? 'Зона: — (океан или мимо шара)'
-              : `Зона: ${zoneId}`
+          const msg = game.onZoneClick(zoneId)
+          hud.textContent = msg
+          syncTurnHud()
         },
         () => game.getStacks(),
         () => game.currentPlayer,

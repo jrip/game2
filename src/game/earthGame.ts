@@ -1,9 +1,13 @@
 import * as THREE from 'three'
 import type { WorldZonesPayload } from '@/zones/worldData'
-import { decodeLandBits, isLandAtLonLat } from '@/zones/worldData'
+import {
+  decodeLandBits,
+  isLandAtLonLat,
+  landZoneIdsInPlay,
+} from '@/zones/worldData'
 import { latLonDegToUnit, nearestZoneByGeodesic } from '@/geo/latLon'
 import { unitToLatLonDeg } from '@/geo/sphereGeo'
-import type { ZoneStack } from '@/game/gameState'
+import type { PlayerId, ZoneStack } from '@/game/gameState'
 import { drawDiceStack, stackPixelHeight } from '@/game/diceDraw'
 
 const DRAG_SENS = 0.006
@@ -38,9 +42,11 @@ export function mountEarth(
   payload: WorldZonesPayload,
   onZonePick: (zoneId: number | null) => void,
   getStacks: () => ZoneStack[],
-  getCurrentPlayer: () => 0 | 1,
+  getCurrentPlayer: () => PlayerId,
 ): () => void {
   const landBits = decodeLandBits(payload.landBits)
+  const inPlay = new Set(landZoneIdsInPlay(payload, landBits))
+  const zonesForPick = payload.zones.filter((z) => inPlay.has(z.id))
 
   const renderer = new THREE.WebGLRenderer({
     canvas,
@@ -144,7 +150,11 @@ export function mountEarth(
       onZonePick(null)
       return
     }
-    onZonePick(nearestZoneByGeodesic(latDeg, lonDeg, payload.zones))
+    if (zonesForPick.length === 0) {
+      onZonePick(null)
+      return
+    }
+    onZonePick(nearestZoneByGeodesic(latDeg, lonDeg, zonesForPick))
   }
 
   const onPointerUp = (e: PointerEvent) => {
@@ -212,6 +222,7 @@ export function mountEarth(
           const syBottom = sy + stackH * 0.5
           drawDiceStack(octx, sx, syBottom, s.dice, s.owner, {
             isMyZone: s.owner === turn,
+            isSelectedAttacker: s.isSelectedAttacker,
             timeMs: now,
           })
         }

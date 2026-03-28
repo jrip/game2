@@ -16,6 +16,8 @@ export interface WorldZonesPayload {
   zoneCount: number
   /** Зоны, в которых есть суша по карте (из генератора). Иначе клиент ошибочно отфильтровывает зоны с сайтом в океане. */
   landZoneIds?: number[]
+  /** zoneNeighbors[z] — id соседних зон по границе карты (из build-zones). */
+  zoneNeighbors?: number[][]
   zones: ZoneDef[]
 }
 
@@ -74,4 +76,25 @@ export function isLandAtLonLat(
     payload.mapHeight,
   )
   return isLandPixel(bits, payload.mapWidth, payload.mapHeight, x, y)
+}
+
+/**
+ * Зоны, участвующие в партии (на карте есть суша). Для клика нужно брать ближайший
+ * центр только среди них, иначе точка на суше может относиться к «океанической»
+ * ячейке Вороного → «зона не в партии».
+ */
+export function landZoneIdsInPlay(
+  payload: WorldZonesPayload,
+  landBits: Uint8Array,
+): number[] {
+  if (payload.landZoneIds && payload.landZoneIds.length > 0) {
+    return [...payload.landZoneIds].sort((a, b) => a - b)
+  }
+  const out: number[] = []
+  for (const z of payload.zones) {
+    if (isLandAtLonLat(payload, landBits, z.lonDeg, z.latDeg)) {
+      out.push(z.id)
+    }
+  }
+  return out.sort((a, b) => a - b)
 }

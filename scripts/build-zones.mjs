@@ -771,6 +771,11 @@ function main() {
     zmax = Math.max(zmax, nz[z])
   }
 
+  /** Соседи по границе пикселей Вороного (для атак только на соседние зоны). */
+  const zoneNeighbors = adjacency.map((set) =>
+    [...set].sort((a, b) => a - b),
+  )
+
   const payload = {
     version: 1,
     mapWidth: TEXTURE_W,
@@ -779,6 +784,7 @@ function main() {
     landThreshold: 0,
     zoneCount: ZONE_COUNT,
     landZoneIds,
+    zoneNeighbors,
     zones: zoneRecords,
   }
   fs.writeFileSync(path.join(outDir, 'zones.json'), JSON.stringify(payload), 'utf8')
