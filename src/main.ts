@@ -5,7 +5,7 @@ import type { WorldZonesPayload } from '@/zones/worldData'
 import { decodeLandBits } from '@/zones/worldData'
 
 async function loadPayload(): Promise<WorldZonesPayload> {
-  const res = await fetch('/data/zones.json')
+  const res = await fetch(`${import.meta.env.BASE_URL}data/zones.json`)
   if (!res.ok) throw new Error(`zones.json: ${res.status}`)
   return res.json() as Promise<WorldZonesPayload>
 }
